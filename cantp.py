@@ -47,8 +47,7 @@ class Receive_State():
 
 class Transmit_State():
     def __init__(self) -> None:
-        self.send_FF = 0
-        self.send_CF = 0
+        self.send_frame = 0
         self.receive_FC = 0
         self.is_done = 0
         self.time_As = 0
@@ -87,13 +86,13 @@ class Info():
         self.data_length = 0
 
 class RcvTimeout():
-    def __init__(self, Ar:int, Br: int, Cr: int) -> None:
+    def __init__(self, Ar:int = 0, Br: int = 0, Cr: int = 0) -> None:
         self.Ar = Ar
         self.Br = Br
         self.Cr = Cr
 
 class TsmTimeout():
-    def __init__(self, As:int, Bs: int, Cs: int) -> None:
+    def __init__(self, As:int = 0, Bs: int = 0, Cs: int = 0) -> None:
         self.As = As
         self.Bs = Bs
         self.Cs = Cs
@@ -137,35 +136,29 @@ class Frame():
         else:
             print("Invalid param")
 
-def SingleFrameHandle(msg: can.Message, bus: int):
+def SingleFrameHandle(msg: can.Message, bus):
     global Receive_State_Info, Receive_Info
     if msg.dlc <= 8: 
         if msg.data[0] & 0x0F == msg.dlc - 1:
-            print(f"Bus {bus} Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 1)}")
+            print(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 1)}")
             Receive_Info.data_str_buffer = ascii_list_to_string(list(msg.data), DUM_BYTE, 1)
             Receive_State_Info.SF = 1
-            if Receive_State_Info.is_done == 1:
-                R_thread.start()
         else:
-            print("Bus {bus} Receive Error")
+            print("Bus  Receive Error")
     elif msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64:
         if msg.data[0] & 0x0F == 0 and msg.data[1] == msg.dlc - 2:
-            print(f"Bus {bus} Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 2)}")
+            print(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 2)}")
             Receive_Info.data_str_buffer = ascii_list_to_string(list(msg.data), DUM_BYTE, 1)
             Receive_State_Info.SF = 1
-            if Receive_State_Info.is_done == 1:
-                
-                R_thread.start()
         else:
-            print(f"Bus {bus} Receive Error")
+            print(f"Bus  Receive Error")
     else: 
-        print(f"Bus {bus} Receive SF Fail")
+        print(f"Bus  Receive SF Fail")
 
-def FirstFrameHandle(msg: can.Message, bus: int):
+def FirstFrameHandle(msg: can.Message, bus):
     global Receive_Info, BS, STmin, Receive_State_Info
     if (msg.data[0] & 0x0F) << 8 | msg.data[1] != 0:
         Receive_Info.data_length = (msg.data[0] & 0x0F) << 8 | msg.data[1]
-        
         if Receive_Info.data_length != 0:
             Receive_Info.BS_cnt = BS
             Receive_Info.SN_cnt = 0
@@ -174,32 +167,38 @@ def FirstFrameHandle(msg: can.Message, bus: int):
             Receive_Info.data_str_buffer = ""
             Receive_Info.data_hex_buf.extend(msg.data[2:])
             Receive_Info.data_str_buffer += ascii_list_to_string(Receive_Info.data_hex_buf, DUM_BYTE)
-            print(f"Bus {bus} Receive FF {Receive_Info.data_str_buffer}")
-            if Receive_State_Info.is_done == 1:
-                R_thread.start()
-
-            # check N_Br timestamp
-            Receive_State_Info.check_Br()
-            Receive_State_Info.time_Br = time.time()
-        
-            # check available buffer, add sleep here to wait or set send_FC to receive CF
-            # time.sleep()
-            Receive_State_Info.available_receive = 1
-            if Receive_State_Info == 2:             # WFT limit reached, abort connetion
-                return
+            print(f"Bus  Receive FF {Receive_Info.data_str_buffer}")
             FC_frame = Frame(frametype=FC, length=8, FS = CTS, BS = BS, STmin = STmin) 
             msg_send_fc = can.Message(arbitration_id=0xAA, data=FC_frame.framefomart, is_extended_id=False)
+
+            # check N_Br timestamp
+            print("start N_Br")
+            # clear flag for abort
+            Receive_State_Info.available_receive = 1
+            ret = Rx_CopyBuffer(bus, timeout=Receive_Timeout.Br, flag=Receive_State_Info.available_receive, Receive_State_Info=Receive_State_Info, Receive_Timeout=Receive_Timeout)
+            if ret == False:
+               return
             
-            #start N_Ar
-            Receive_State_Info.check_Ar()
-            Receive_State_Info.time_Ar = time.time()
-            if bus == 1:
-                SendMsg(bus1, msg_send_fc)
-            else:
-                SendMsg(bus2, msg_send_fc)
+            #start N_Ar for FC(CTS)
+            print("start N_Ar")
+            # dont set this flag if want to get N_Ar timeout
             Receive_State_Info.send_FC = 1
+            ret = SendMsg(bus=bus, msg=msg_send_fc, timeout=Receive_Timeout.Ar, flag = Receive_State_Info.send_FC)
+            if ret == False:
+                print("N_Ar timeout")
+                return    
+
+            print("Start Cr")
+            if (Receive_State_Info.is_done == 1):
+                Receive_State_Info.is_done = 0
+                Rcv_thread.start()
+            # ret = ReceiveCF(Receive_Timeout=Receive_Timeout, Receive_State_Info=Receive_State_Info)
+            # ret = ReceiveMsg(Receive_Timeout.Cr, Receive_State_Info.receive_CF, rcv_time=Receive_State_Info.time_Cr)
+            # if ret == False:        #N_Cr occurrence
+            #     print("N_Cr timeout")
+            #     return
         else:
-            print(f"Bus {bus} Bus {bus} Receive FF 1fail")
+            print(f"Bus  Bus  Receive FF 1fail")
     else:
         # edit later
         Receive_Info.data_length = (msg.data[2] << 24) | (msg.data[3] << 16) | (msg.data[4] << 8) | msg.data[5]
@@ -211,32 +210,41 @@ def FirstFrameHandle(msg: can.Message, bus: int):
             Receive_Info.data_str_buffer = ""
             Receive_Info.data_hex_buf.extend(msg.data[6:])
             Receive_Info.data_str_buffer += ascii_list_to_string(Receive_Info.data_hex_buf, DUM_BYTE)
-            print(f"Bus {bus} Receive FF {Receive_Info.data_str_buffer}")
-
-            
-            if Receive_State_Info.is_done == 1:
-                R_thread.start()
-            # check available buffer
-            
-            Receive_State_Info.available_receive = 1
-            Receive_State_Info.time_Br = time.time()
-
+            print(f"Bus  Receive FF {Receive_Info.data_str_buffer}")
             FC_frame = Frame(frametype=FC, length=8, FS = CTS, BS = BS, STmin = STmin) 
             msg_send_fc = can.Message(arbitration_id=0xAA, data=FC_frame.framefomart, is_extended_id=False)
-
-            #start N_Ar
-            Receive_State_Info.check_Ar()
-            Receive_State_Info.time_Ar = time.time()
-            if bus == 1:
-                SendMsg(bus1, msg_send_fc)
-            else:
-                SendMsg(bus2, msg_send_fc)
+            
+            # check N_Br timestamp
+            print("start N_Br")
+            # clear flag for abort
+            Receive_State_Info.available_receive = 1
+            ret = Rx_CopyBuffer(bus, timeout=Receive_Timeout.Br, flag=Receive_State_Info.available_receive, Receive_State_Info=Receive_State_Info, Receive_Timeout=Receive_Timeout)
+            if ret == False:
+                print("N_Br timeout")
+                return
+            
+            #start N_Ar for FC(CTS)
+            print("start N_Ar")
+            # dont set this flag if want to get N_Ar timeout
             Receive_State_Info.send_FC = 1
-        else:
-            print(f"Bus {bus} Receive FF 2fail")
+            ret = SendMsg(bus=bus, msg=msg_send_fc, timeout=Receive_Timeout.Ar, flag = Receive_State_Info.send_FC)
+            if ret == False:
+                print("N_Ar timeout")
+                return       
 
-def ConsecutiveFrameHandle(msg: can.Message, bus: int):
-    global Receive_Info, BS
+            print("Start Cr")
+            if (Receive_State_Info.is_done == 1):
+                Receive_State_Info.is_done = 0
+                Rcv_thread.start()        
+            # if ret == False:        #N_Cr occurrence
+            #     print("N_Cr timeout")
+            #     return
+        else:
+            print(f"Bus  Receive FF 2fail")
+
+def ConsecutiveFrameHandle(msg: can.Message, bus):
+    global Receive_Info, BS, Receive_State_Info
+    ret = False
     if msg.dlc == 8 or msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64:
         if msg.dlc == Receive_Info.RX_DL and ((msg.data[0] & 0x0F == Receive_Info.SN_cnt + 1) or (msg.data[0] & 0x0F == 0 and Receive_Info.SN_cnt == 15)):
             
@@ -245,64 +253,70 @@ def ConsecutiveFrameHandle(msg: can.Message, bus: int):
             Receive_Info.data_hex_buf.extend(msg.data[1:])
             Receive_Info.BS_cnt -= 1
             Receive_Info.data_str_buffer += ascii_list_to_string(Receive_Info.data_hex_buf, DUM_BYTE)
-            Receive_State_Info.CF = 1
-            Receive_State_Info.time_Cr = time.time()
             
             print(f"COUNTER: {Receive_Info.BS_cnt}")
             
-            print(f"Bus {bus} Receive CS {Receive_Info.SN_cnt}: {Receive_Info.data_str_buffer}")
-            if len(Receive_Info.data_str_buffer) < Receive_Info.data_length:
+            print(f"Bus  Receive CS {Receive_Info.SN_cnt}: {Receive_Info.data_str_buffer}")
+            if len(Receive_Info.data_str_buffer) < Receive_Info.data_length and Receive_State_Info.is_done == 0:
                 # print(f"{len(Receive_Info.data_str_buffer)} and {Receive_Info.data_length}")
                 # print("send FC")
                 if Receive_Info.BS_cnt == 0:
                     Receive_Info.BS_cnt = BS
-                    
-                    # FC_frame = Frame(frametype=FC, length=8, FS = WAIT, BS = BS, STmin = STmin)           
-                    # msg_send_fc = can.Message(arbitration_id=0xAA, data=FC_frame.framefomart, is_extended_id=False)
-                    # #start N_Ar
-                    # Receive_State_Info.check_Ar()
-                    # Receive_State_Info.time_Ar = time.time()
-                    # if bus == 1:
-                    #     SendMsg(bus1, msg_send_fc)
-                    # else:
-                    #     SendMsg(bus2, msg_send_fc)
-
                     FC_frame = Frame(frametype=FC, length=8, FS = CTS, BS = BS, STmin = STmin)           
                     msg_send_fc = can.Message(arbitration_id=0xAA, data=FC_frame.framefomart, is_extended_id=False)
-
+                    Receive_State_Info.receive_CF = 1
+                    print("start N_Br")
+                    # clear flag for abort
+                    Receive_State_Info.available_receive = 1
+                    ret = Rx_CopyBuffer(bus, timeout=Receive_Timeout.Br, flag=Receive_State_Info.available_receive, Receive_State_Info=Receive_State_Info, Receive_Timeout=Receive_Timeout)
+                    if ret == False:
+                        print("N_Br timeout")
+                        return  
+                    
                     #start N_Ar
-                    Receive_State_Info.check_Ar()
-                    Receive_State_Info.time_Ar = time.time()
-                    if bus == 1:
-                        SendMsg(bus1, msg_send_fc)
-                    else:
-                        SendMsg(bus2, msg_send_fc)
+                    print("start N_Ar")
+                    # dont set this flag if want to get N_Ar timeout
                     Receive_State_Info.send_FC = 1
+                    ret = SendMsg(bus=bus, msg=msg_send_fc, timeout=Receive_Timeout.Ar, flag = Receive_State_Info.send_FC)
+                    if ret == False:
+                        print("N_Ar timeout")
+                        return
+                    
+                    #start N_Cr
+                    print("Start Cr")
+                    if (Receive_State_Info.is_done == 1):
+                        Receive_State_Info.is_done = 0
+                        Rcv_thread.start()        
+                    # if ret == False:        #N_Cr occurrence
+                    #     print("N_Cr timeout")
+                    #     return
+                else:
+                    Receive_State_Info.time_Cr = time.time()
             else:
                 print("Complete receive")
                 Receive_State_Info.is_done = 1
         else:
-            print(f"Bus {bus} Receive CS fail1 {msg.data[0]}, {Receive_Info.SN_cnt + 1} {(msg.data[0] & 0x0F == Receive_Info.SN_cnt + 1)} {msg.data[0] == 0 and Receive_Info.SN_cnt == 15}")
+            print(f"Bus  Receive CS fail1 {msg.data[0]}, {Receive_Info.SN_cnt + 1} {(msg.data[0] & 0x0F == Receive_Info.SN_cnt + 1)} {msg.data[0] == 0 and Receive_Info.SN_cnt == 15}")
     else:
-        print(f"Bus {bus} Receive CS fail3")
+        print(f"Bus  Receive CS fail3")
 
-def FlowControlHandle(msg: can.Message, bus: int):
+def FlowControlHandle(msg: can.Message, bus):
     global Transmit_Info, Transmit_State_Info
     if msg.dlc == 8:
         if msg.data[0] & 0x0F == CTS:
             Transmit_State_Info.receive_FC = 1
             prGreen(f"receive_FC {time.time()}")
-            # Transmit_State_Info.time_Cs = time.time()
             Transmit_Info.BS_cnt = msg.data[1]
             Transmit_Info.STmin = msg.data[2]
-            prGreen(f"Bus {bus} Receive CTS ")
+            # prGreen(f"Bus  Receive CTS ")
         elif msg.data[0] &0x0F == WAIT:
-            prGreen(f"Bus {bus} Receive WAIT")
+            prGreen(f"Bus  Receive WAIT")
             # reload Bs
+            Transmit_State_Info.time_Bs = time.time()
         elif msg.data[0] &0x0F == OVFLW:  
-            prGreen(f"Bus {bus} Overflow, abort connection")
+            prGreen(f"Bus  Overflow, abort connection")
     else: 
-        prGreen(f"Bus {bus} Receive FC fail, abort connection")
+        prGreen(f"Bus  Receive FC fail, abort connection")
 
 def string_to_ascii_list(str):
     return [ord(char) for char in str]
@@ -326,303 +340,212 @@ class ListenerHandlebus2(can.Listener):
         print(f"Receive message bus 2: {msg}")
         if msg.data[0] >> 4 == 0:
             # print("Single frame")
-            SingleFrameHandle(msg, 2)
+            SingleFrameHandle(msg, bus2)
         elif msg.data[0] >> 4 == 1:
             # print("First frame")
-            FirstFrameHandle(msg, 2)
+            FirstFrameHandle(msg, bus2)
         elif msg.data[0] >> 4 == 2:
             # print("Consecutive frame")
-            ConsecutiveFrameHandle(msg, 2)
+            ConsecutiveFrameHandle(msg, bus2)
         elif msg.data[0] >> 4 == 3:
             # print("Flow control")
-            FlowControlHandle(msg, 2)
+            FlowControlHandle(msg, bus2)
 
 class ListenerHandlebus1(can.Listener):
     def on_message_received(self, msg: can.Message):
         print(f"Receive message bus 1: {msg}")
         if msg.data[0] >> 4 == 0:
             # print("Single frame")
-            SingleFrameHandle(msg, 1)
+            SingleFrameHandle(msg, bus1)
         elif msg.data[0] >> 4 == 1:
             # print("First frame")
-            FirstFrameHandle(msg, 1)
+            FirstFrameHandle(msg, bus1)
         elif msg.data[0] >> 4 == 2:
             # print("Consecutive frame")
-            ConsecutiveFrameHandle(msg, 1)
+            ConsecutiveFrameHandle(msg, bus1)
         elif msg.data[0] >> 4 == 3:
             # print("Flow control")
-            FlowControlHandle(msg, 1)
+            FlowControlHandle(msg, bus1)
 
-def Transmit(bus: int, id: int, TX_DL: int , data_buf: list, length: int, is_fd: bool = False):
-    global Transmit_Info, bus1, bus2, Transmit_State_Info
+def Transmit(bus, id: int, TX_DL: int , data_buf: list, length: int, is_fd: bool = False):
+    global Transmit_Info, Transmit_State_Info, Transmit_Timeout
     index = last_index = 0           #begin index of new frame in buffer
-    
+    ret = False
     if (length < 7 and TX_DL == 8):                         #single frame <= 8
         send_frame = Frame(frametype=SF, length=TX_DL, data=data_buf)
         msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=is_fd)
 
         #start N_As
-        Transmit_State_Info.time_As = time.time()
-        Transmit_State_Info.check_As()
-        while Transmit_State_Info.result == 0:              # wait check N_Bs timeout
-            pass
-        if Transmit_State_Info.result == 2:
+        prGreen("start N_As")
+        # dont set this flag if want to get N_As timeout
+        Transmit_State_Info.send_frame = 1
+        ret = SendMsg(bus=bus, msg=msg_send, timeout=Transmit_Timeout.As, flag = Transmit_State_Info.send_frame)
+        if ret == False:
             return
-        # #print(Transmit_State_Info.check_request)
-        if bus == 1:
-            SendMsg(bus1, msg_send)
-        else:
-            SendMsg(bus2, msg_send)
-        Transmit_State_Info.send_FF = 1
 
     elif (length < TX_DL - 2 and ( TX_DL == 12 or TX_DL == 16 or TX_DL == 20 or TX_DL == 24 or TX_DL == 32 or TX_DL == 48 or TX_DL == 64)):         #SF > 8
         send_frame = Frame(frametype=SF, length=TX_DL, data=data_buf)
         msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=True)
 
-        #start N_As
-        Transmit_State_Info.time_As = time.time()
-        Transmit_State_Info.check_As()
-        #print(Transmit_State_Info.check_request)
-        if bus == 1:
-            SendMsg(bus1, msg_send)
-        else:
-            SendMsg(bus2, msg_send)
-        Transmit_State_Info.send_FF = 1
-        while Transmit_State_Info.result == 0:              # wait check N_Bs timeout
-            pass
-        if Transmit_State_Info.result == 2:
+        prGreen("start N_As")
+        # dont set this flag if want to get N_As timeout
+        Transmit_State_Info.send_frame = 1
+        ret = SendMsg(bus=bus, msg=msg_send, timeout=Transmit_Timeout.As, flag = Transmit_State_Info.send_frame)    
+        if ret == False:
             return
     else:
-        T_thread.start()
         index = TX_DL - 2
         send_frame = Frame(frametype=FF, length=TX_DL, data=data_buf[:index], DL=length)
         msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=True)
         Transmit_Info.SN_cnt += 1
 
+
         #start N_As
         prGreen("start N_As")
-        Transmit_State_Info.time_As = time.time()
-        Transmit_State_Info.check_As()
-        if bus == 1:
-            SendMsg(bus1, msg_send)
-        else:
-            SendMsg(bus2, msg_send)
-        Transmit_State_Info.send_FF = 1
-        # print(Transmit_State_Info.check_request)
-        while Transmit_State_Info.result == 0:              # wait check N_Bs timeout
-            pass
-        if Transmit_State_Info.result == 2:
+        # dont set this flag if want to get N_As timeout
+        Transmit_State_Info.send_frame = 1
+        ret = SendMsg(bus=bus, msg=msg_send, timeout=Transmit_Timeout.As, flag = Transmit_State_Info.send_frame)
+        if ret == False:        #N_As occurrence
+            prGreen("N_As timeout")
+            Transmit_State_Info.is_done = 1
             return
-        #start N_Bs and wait FC
+        prGreen("send FF")
+        # start N_Bs and wait FC
         prGreen("Check Bs")
-        Transmit_State_Info.check_Bs()
-        Transmit_State_Info.time_Bs = time.time()
-        prGreen(f"time Bs start {Transmit_State_Info.time_Bs}")
+        ret = ReceiveFC(Transmit_Timeout=Transmit_Timeout, Transmit_State_Info=Transmit_State_Info)
+        if ret == False:        #N_Bs occurrence
+            prGreen("N_Bs timeout")
+            Transmit_State_Info.is_done = 1
+            return
 
-        while Transmit_State_Info.result == 0:              # wait check N_Bs timeout
-            pass
-        prGreen(f"Check Bs done {Transmit_State_Info.result}")
-        if (Transmit_State_Info.result == 10):
-            while index < length and Transmit_State_Info.is_done == 0:
-                Transmit_State_Info.is_done = 0
-                time.sleep(CalculateSTmin(Transmit_Info.STmin))
-                # Transmit_State_Info.receive_FC = 0
-                if index + TX_DL - 1 <= length - 1:              # check
-                    last_index = index
-                    index = index + TX_DL - 1
-                    send_frame = Frame(frametype=CF, length=TX_DL, data=data_buf[last_index:index], SN=Transmit_Info.SN_cnt)
-                    Transmit_Info.SN_cnt += 1
-                    if Transmit_Info.SN_cnt == 16:
-                        Transmit_Info.SN_cnt = 0
-                    Transmit_Info.BS_cnt -= 1
-                    msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=True)
+        while index < length and Transmit_State_Info.is_done == 0:
+            Transmit_State_Info.is_done = 0
+            time.sleep(CalculateSTmin(Transmit_Info.STmin))
+            # Transmit_State_Info.receive_FC = 0
+            if index + TX_DL - 1 < length:              # check
+                last_index = index
+                index = index + TX_DL - 1
+                send_frame = Frame(frametype=CF, length=TX_DL, data=data_buf[last_index:index], SN=Transmit_Info.SN_cnt)
+                Transmit_Info.SN_cnt += 1
+                if Transmit_Info.SN_cnt == 16:
+                    Transmit_Info.SN_cnt = 0
+                Transmit_Info.BS_cnt -= 1
+                msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=True)
+                # start N_As
+                prGreen("start N_As")
+                # dont set this flag if want to get N_As timeout
+                Transmit_State_Info.send_frame = 1
+                ret = SendMsg(bus=bus, msg=msg_send, timeout=Transmit_Timeout.As, flag = Transmit_State_Info.send_frame)
+                prGreen("send CF")
 
-                    # start N_As
-                    prGreen(f"Start As {Transmit_Info.SN_cnt} {Transmit_Info.BS_cnt}")
-                    Transmit_State_Info.check_As()
-                    Transmit_State_Info.time_As = time.time()
-                    prGreen(Transmit_State_Info.check_request)
-                    if bus == 1:
-                        SendMsg(bus1, msg_send)
-                    else:
-                        SendMsg(bus2, msg_send)
-                    Transmit_State_Info.send_CF = 1
-                    prGreen(f"?????{Transmit_State_Info.send_CF}")
-                    while Transmit_State_Info.result == 0:              # wait check N_Bs timeout
-                        pass
-                    if Transmit_State_Info.result == 2:
-                        return
-                    prGreen("send CF")
-                else:
-                    send_frame = Frame(frametype=CF, length=TX_DL, data=data_buf[index:], SN=Transmit_Info.SN_cnt)
-                    Transmit_Info.SN_cnt += 1
-                    if Transmit_Info.SN_cnt == 16:
-                        Transmit_Info.SN_cnt = 0
-                    Transmit_Info.BS_cnt -= 1
+                if ret == False:        #N_As occurrence
+                    prGreen("N_As timeout")
                     Transmit_State_Info.is_done = 1
-                
-                # check N_Cs timeout (wait CF send)
-
-                    msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=True)
-                    
-                    # start N_As
-                    prGreen(f"Start As 1 {Transmit_Info.SN_cnt} {Transmit_Info.BS_cnt}")
-                    Transmit_State_Info.time_As = time.time()
-                    Transmit_State_Info.check_As()
-                    # #print(Transmit_State_Info.check_request)
-                    if bus == 1:
-                        SendMsg(bus1, msg_send)
-                    else:
-                        SendMsg(bus2, msg_send)
-                    Transmit_State_Info.send_CF = 1
-                    while Transmit_State_Info.result == 0:              # wait check N_Bs timeout
-                        pass
-                    if Transmit_State_Info.result == 2:
-                        return
-                
-                # if Transmit_State_Info.is_done == 1:
-                #     break
-                if Transmit_Info.BS_cnt == 0:
-                    Transmit_State_Info.time_Bs = time.time()
-                    prGreen(f"time Bs start {Transmit_State_Info.time_Bs}")
-                    Transmit_State_Info.check_Bs()
-                    while Transmit_State_Info.result == 0:
-                        pass
-                    prGreen(f"Check Bs done {Transmit_State_Info.result}")
-                else:
-                    # Transmit_State_Info.time_Cs = time.time()
-                    # Transmit_State_Info.check_Cs()
-                    # time.sleep(CalculateSTmin(Transmit_Info.STmin))
-                    pass
-
-                # while Transmit_State_Info.receive_FC == 0 and Transmit_Info.BS_cnt == 0:          # wait to receive FC when transmit number frame = blocksize
-                #     pass
-
-def ReceiveHanle():
-    global Receive_State_Info, Receive_Info
-    Receive_Timeout = RcvTimeout(0.2, 0.2, 0.5)
-    Receive_State_Info.is_done = 0
-
-    while Receive_State_Info.is_done == 0:
-        #check N_Ar timeout (receive FC)
-        if Receive_State_Info.check_request == 1:          #N_Ar check
-            # start N_ar when start send FC
-            while Receive_State_Info.send_FC == 0 and time.time() - Receive_State_Info.time_Ar < Receive_Timeout.Ar:
-                pass
-            if Receive_State_Info.send_FC == 1:
-                print("Send FC from receiver")
-                Receive_State_Info.result = 1
-                Receive_State_Info.check_request = 0
-                Receive_State_Info.send_FC = 0
+                    return
             else:
-                print("N_Ar timeout. Abort connection")
-                Receive_State_Info.is_done = 1
-                Receive_State_Info.result = 2
-                Receive_State_Info.check_request = 0
-        elif Receive_State_Info.check_request == 2:        #N_Br check, start when receive last CF in block and receive FF, edit later
-            while Receive_State_Info.available_receive == 0 and time.time() - Receive_State_Info.time_Br < Receive_Timeout.Br:
-                pass
-            if Receive_State_Info.receive_FC == 1:
-                print("Send FC(CTS)")
-                Receive_State_Info.result = 1
-                Receive_State_Info.WFT_cnt = WFT
-            else:
-                print("N_Br Timeout, reload N_Br")
-                Receive_State_Info.time_Br = time.time()
-                Receive_State_Info.WFT_cnt -= 1
-                if Receive_State_Info.WFT_cnt == -1:
-                    print("Reach WFT limit. Abort conection")
-                    Receive_State_Info.result = 2
-                    Receive_State_Info.is_done = 1
-                    Receive_State_Info.check_request = 0
-                    Receive_State_Info.WFT_cnt = WFT
-        
-        
-        elif Receive_State_Info.check_request == 3:     #N_Cr check
-            #start N_Cs when after send FC, reload when receive CF(not last frame in block)
-            while Receive_State_Info.receive_CF == 0 and time.time() - Receive_State_Info.time_Cr < Receive_Timeout.Cr:
-                pass
-            if Receive_State_Info.receive_CF == 1:
-                print("Receive CF")
-                Receive_State_Info.result = 1
-            else:
-                print("N_Cr timeout. Abort connection")
-                Receive_State_Info.is_done = 1
-                Receive_State_Info.result = 2
-
-def TransmitHanle():
-    global Transmit_Info, Transmit_State_Info
-    Transmit_State_Info.receive_FC = 0
-    Transmit_Timeout = TsmTimeout(0.2, 1, 0.2)
-    while Transmit_State_Info.is_done == 0:
-        #check N_Bs timeout (receive FC)
-        if Transmit_State_Info.check_request == 1:          #N_As check
-            while (Transmit_State_Info.send_FF == 0 and Transmit_State_Info.send_CF == 0) and time.time() - Transmit_State_Info.time_As < Transmit_Timeout.As:
-                pass
-            if Transmit_State_Info.send_FF == 1 or Transmit_State_Info.send_CF == 1:
-                prGreen("Send frame from transmiter")
-                Transmit_State_Info.result = 11
-                Transmit_State_Info.send_FF = Transmit_State_Info.send_CF = 0
-                Transmit_State_Info.check_request = 0
-            else:
-                prGreen("N_As timeout. Abort connection")
-                # time.sleep(1)
-                Transmit_State_Info.check_request = 0
+                send_frame = Frame(frametype=CF, length=TX_DL, data=data_buf[index:], SN=Transmit_Info.SN_cnt)
+                Transmit_Info.SN_cnt += 1
+                if Transmit_Info.SN_cnt == 16:
+                    Transmit_Info.SN_cnt = 0
+                Transmit_Info.BS_cnt -= 1
                 Transmit_State_Info.is_done = 1
-                Transmit_State_Info.result = 2
-        elif Transmit_State_Info.check_request == 2:        #N_Bs check
-            Transmit_State_Info.check_request = Transmit_State_Info.result = 0
-            while Transmit_State_Info.receive_FC == 0 and time.time() - Transmit_State_Info.time_Bs < Transmit_Timeout.Bs:
-                pass
-            prGreen(f"{Transmit_State_Info.receive_FC} {time.time() - Transmit_State_Info.time_Bs < Transmit_Timeout.Bs} {time.time()} {Transmit_State_Info.time_Bs}")
-            if Transmit_State_Info.receive_FC == 1:
-                prGreen("Receive FC(CTS)")
-                Transmit_State_Info.result = 10
-                Transmit_State_Info.receive_FC = 0
-                Transmit_State_Info.check_request = 0
+                msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=True)
+                # start N_As
+                prGreen("start N_As")
+                # dont set this flag if want to get N_As timeout
+                Transmit_State_Info.send_frame = 1
+                ret = SendMsg(bus=bus, msg=msg_send, timeout=Transmit_Timeout.As, flag = Transmit_State_Info.send_frame)
+                if ret == False:        #N_As occurrence
+                    prGreen("N_As timeout")
+                    Transmit_State_Info.is_done = 1
+                    return
+                
+            if Transmit_Info.BS_cnt == 0 and Transmit_State_Info.is_done == 0:
+                prGreen("Check Bs")
+                ret = ReceiveFC(Transmit_Timeout=Transmit_Timeout, Transmit_State_Info=Transmit_State_Info)
+                if ret == False:        #N_Bs occurrence
+                    prGreen("N_Bs timeout")
+                    Transmit_State_Info.is_done = 1
+                    return
             else:
-                prGreen("N_Bs Timeout, abort connection")
-                Transmit_State_Info.is_done = 1
-                Transmit_State_Info.result = 2
-                Transmit_State_Info.check_request = 0
-        elif Transmit_State_Info.check_request == 3:
-            pass #latter
-    if (Transmit_State_Info.is_done == 1):
-        prGreen("Transmit complete")
+                # Transmit_State_Info.time_Cs = time.time()
+                # Transmit_State_Info.check_Cs()
+                # time.sleep(CalculateSTmin(Transmit_Info.STmin))
+                pass
 
-def SendMsg(bus, msg: can.Message, timeout: float = 0.0, flg: int = 0):
-    global Transmit_State_Info
-    # Transmit_State_Info.check_As()
-    # Transmit_State_Info.time_As = time.time()
-    # sleep in here  
-    # time.sleep(0.3)
-    bus.send(msg)
 
-def ReceiveMsg(timeout: float = 0.0, flg: int = 0):
-    rcv_time = time.time()
-
-    while flg == 1 or time.time() - rcv_time <= timeout:
+def ReceiveHanle(timeout: float = 0, Receive_State_Info: Receive_State = Receive_State()):
+    
+    Receive_State_Info.time_Cr = time.time()
+    Receive_State_Info.receive_CF = 0
+    
+    while Receive_State_Info.receive_CF == 0 and time.time() - Receive_State_Info.time_Cr <= timeout:
         pass
-    if flg == 1:
-        flg == 0
+    if Receive_State_Info.receive_CF == 1:              #receive last CF
+        return True
+    else: 
+        print("Cr timeout")
+        Receive_State_Info.is_done = 1
+        return False
+
+def SendMsg(bus, msg: can.Message, timeout: float = 0.0, flag: int = 0):
+    tsm_time = time.time()
+    while flag == 0 and time.time() - tsm_time <= timeout:
+        pass
+    if flag == 1:
+        flag = 0
+        bus.send(msg)
         return True
     else:
         return False
 
+def ReceiveFC(Transmit_Timeout: TsmTimeout = TsmTimeout(), Transmit_State_Info: Transmit_State = Transmit_State()):
+    Transmit_State_Info.time_Bs = time.time()
+    while Transmit_State_Info.receive_FC == 0 and time.time() - Transmit_State_Info.time_Bs <= Transmit_Timeout.Bs:
+        pass
+    if Transmit_State_Info.receive_FC == 1:
+        Transmit_State_Info.receive_FC = 0
+        return True
+    else:
+        print(f"{Transmit_State_Info.time_Bs} {time.time()}")
+        return False
 
-R_thread = threading.Thread(target=ReceiveHanle)
-T_thread = threading.Thread(target=TransmitHanle)
+def Rx_CopyBuffer(bus, timeout: float = 0.0, flag: int = 0, Receive_State_Info: Receive_State = Receive_State(), Receive_Timeout: RcvTimeout = RcvTimeout()):   
+    ready_time = time.time()
+
+    while Receive_State_Info.WFT_cnt != 0:
+        while flag == 0 and time.time() - ready_time <= timeout:
+            pass
+        if flag == 1:
+            flag = 0
+            return True
+        else:
+            ready_time = time.time()
+            Receive_State_Info.WFT_cnt -= 1
+            FC_frame = Frame(frametype=FC, length=8, FS = WAIT, BS = BS, STmin = STmin)           
+            msg_send_fc = can.Message(arbitration_id=0xAA, data=FC_frame.framefomart, is_extended_id=False)
+
+            print("start N_Ar")
+            # dont set this flag if want to get N_Ar timeout
+            Receive_State_Info.send_FC = 1
+            ret = SendMsg(bus=bus, msg=msg_send_fc, timeout=Receive_Timeout.Ar, flag = Receive_State_Info.send_FC)
+            if ret == False:
+                return False
+    return False
 
 bus1 = can.ThreadSafeBus('test', interface='virtual')
 bus2 = can.ThreadSafeBus('test', interface='virtual')
 
-
 Transmit_Info = Info()
 Receive_Info = Info()
 
+
 Receive_State_Info = Receive_State()
 Transmit_State_Info = Transmit_State()
+Receive_Timeout = RcvTimeout(0.2, 0.2, 0.5)
+Transmit_Timeout = TsmTimeout(0.2, 0.5, 0.5)
 
+Rcv_thread = threading.Thread(target=ReceiveHanle, args=(Receive_Timeout.Cr, Receive_State_Info,))
 # mutex_send_buf = threading.Lock()
 # mutex_rcv_buf = threading.Lock()
 
@@ -658,23 +581,20 @@ Trump has expressed skepticism about the amount of aid the U.S. has provided Ukr
         while 1:
             choice = input()
             if choice == 's1':
-                Transmit(bus=1, id=0x012, TX_DL=8, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
+                Transmit(bus1, id=0x012, TX_DL=64, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
             elif choice == 's2':
-                Transmit(bus=1, id=0x012, TX_DL=8, data_buf=string_to_ascii_list(send_data_a), length=len(send_data_a), is_fd= True)
+                Transmit(bus1, id=0x012, TX_DL=8, data_buf=string_to_ascii_list(send_data_a), length=len(send_data_a), is_fd= True)
             else:
                 print("quit")
                 break
-        Receive_State_Info.is_done = 1
+        # Receive_State_Info.is_done = 1
         Transmit_State_Info.is_done = 1
-        T_thread.join()
-        R_thread.join()
     except KeyboardInterrupt:
         Receive_State_Info.is_done = 1
         Transmit_State_Info.is_done = 1
-        T_thread.join()
-        R_thread.join() 
         notifier1.stop()
         notifier2.stop()
+        Rcv_thread.join()
         # shutdown bus
         bus1.shutdown()
         bus2.shutdown()
