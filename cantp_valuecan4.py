@@ -58,6 +58,14 @@ class Info():
         self.RX_DL = 0
         self.data_length = 0
         self.STmin = 0
+    def reset_param(self):
+        self.SN_cnt = 0
+        self.BS_cnt = 0
+        self.data_hex_buf = []
+        self.data_str_buffer = ""
+        self.RX_DL = 0
+        self.data_length = 0
+        self.STmin = 0
  
 class RcvTimeout():
     def __init__(self, Ar:int = 0, Br: int = 0, Cr: int = 0) -> None:
@@ -102,6 +110,7 @@ class Frame():
                 replace_elements(self.framefomart, data, 6)
         elif frametype == CF:                    # need frametype, data, len, SN
             self.framefomart[0] = (CF << 4) | SN
+            # prGreen(f"{self.framefomart[0]} {CF} {SN}")
             self.framefomart[1:len(data) + 1] = data
         elif frametype == FC:                    # need frametype, data, len, BS, STmin
             self.framefomart[0] = (FC << 4) | FS
@@ -112,6 +121,7 @@ class Frame():
  
 def SingleFrameHandle(msg: can.Message, bus):
     global Receive_State_Info, Receive_Info
+    Receive_Info.reset_param()
     if msg.dlc <= 8:
         if msg.data[0] & 0x0F == msg.dlc - 1:
             print(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 1)}")
@@ -131,6 +141,7 @@ def SingleFrameHandle(msg: can.Message, bus):
  
 def FirstFrameHandle(msg: can.Message, bus: can.ThreadSafeBus):
     global Receive_Info, BS, STmin, Receive_State_Info
+    Receive_Info.reset_param()
     Rcv_thread = threading.Thread(target=ReceiveHanle, args=(Receive_Timeout.Cr, Receive_State_Info,))
     if (msg.data[0] & 0x0F) << 8 | msg.data[1] != 0:
         Receive_Info.data_length = (msg.data[0] & 0x0F) << 8 | msg.data[1]
@@ -341,6 +352,7 @@ class ListenerHandlebus(can.Listener):
 def Transmit(bus, id: int, TX_DL: int , data_buf: list, length: int, is_fd: bool = False):
     global Transmit_Info, Transmit_State_Info, Transmit_Timeout
     Transmit_State_Info.is_done = 0
+    Transmit_Info.reset_param()
     index = last_index = 0           #begin index of new frame in buffer
     ret = False
     if (length < 7 and TX_DL == 8):                         #single frame <= 8
@@ -377,7 +389,7 @@ def Transmit(bus, id: int, TX_DL: int , data_buf: list, length: int, is_fd: bool
         send_frame = Frame(frametype=FF, length=TX_DL, data=data_buf[:index], DL=length)
         msg_send = can.Message(arbitration_id=id, data=send_frame.framefomart, is_fd=True)
         Transmit_Info.SN_cnt += 1
-    
+   
         #start N_As
         prBlue("start N_As")
         # dont set this flag if want to get N_As timeout
@@ -480,7 +492,6 @@ def SendMsg(bus: can.ThreadSafeBus, msg: can.Message, timeout: float = 0.0, flag
     while flag == 0 and time.time() - tsm_time <= timeout:
         pass
     if flag == 1:
-        # flag = 0
         bus.send(msg)
         return True
     else:
@@ -523,9 +534,6 @@ def Rx_CopyBuffer(bus, fc_id = 0, timeout: float = 0.0, Receive_State_Info: Rece
     prYellow("WFT reach limit")
     return False
  
-# bus1 = can.ThreadSafeBus('test', interface='virtual')
-# bus2 = can.ThreadSafeBus('test', interface='virtual')
- 
 Transmit_Info = Info()
 Receive_Info = Info()
  
@@ -542,10 +550,38 @@ Transmit_Timeout = TsmTimeout(0.2, 0.5, 0.5)
 if __name__ == "__main__":
  
     notifier = can.Notifier(bus, [ListenerHandlebus()])
-    send_data_b ='''Trump and his allies say the legal campaign, which includes a wide-ranging challenge to the citizenship status of voters in Arizona, is a defense of election integrity.
+    send_data_b ='''WASHINGTON, Sept 19 (Reuters) - Donald Trump and his Republican allies are ratcheting up baseless claims that the Nov. 5 U.S. presidential election could be skewed by widespread voting by non-citizens in a series of lawsuits that democracy advocates say are meant to sow distrust.
+At least eight lawsuits have been filed challenging voter registration procedures in four of the seven swing states expected to decide the election contest between Trump and his Democratic rival, Vice President Kamala Harris.
+Trump and his allies say the legal campaign, which includes a wide-ranging challenge to the citizenship status of voters in Arizona, is a defense of election integrity.
 But their court filings offer little evidence of the phenomenon that independent studies show to be too rare to affect election results, legal experts said.
 "The former president is trying to do what he's done the last three times he's run, and set up this 'If I win the election is valid and if I lose the election was rigged' narrative," said New Mexico Secretary of State Maggie Toulouse Oliver, a Democrat. Apart from his more recent presidential bids, Trump briefly ran in 2000 for the Reform Party.
-The Trump campaign referred a request for comment to a spokesperson for the Republican National Committee, who said, "We believe our lawsuits will stop non-citizen voting, which threatens American votes."'''
+The Trump campaign referred a request for comment to a spokesperson for the Republican National Committee, who said, "We believe our lawsuits will stop non-citizen voting, which threatens American votes."
+It is a felony offense for a non-citizen to vote in a federal election and independent studies, opens new tab have shown it rarely happens.
+Backers of Trump's strategy say that even one illegally cast ballot is too many.
+Ohio Secretary of State Frank LaRose, a Republican, told a congressional panel last week that non-citizen voting is a rarity but that enforcement is necessary to keep it that way. He said his office recently identified nearly 600 non-citizens from state voter rolls that contain about 8 million registrants in total.
+"We found 135 this year that had voted. We found another 400 that were registered but hadn't yet voted. And this idea that it's already illegal? It's illegal to hijack airplanes, but we don't get rid of the TSA," LaRose said.
+A study of Trump's false claims of widespread non-citizen voting in the 2016 presidential election showed only 30 incidents among 23.5 million ballots cast, accounting for 0.0001% of the vote, opens new tab, the Brennan Center for Justice at New York University said.Federal law prohibits large-scale changes to voter rolls within 90 days of an election as well as purges that target particular class of voters, such as recently naturalized citizens, which the U.S. Justice Department reminded states of in an advisory last week.
+That fact, democracy advocates say, show that Trump and his allies' strategy in pursuing these suits is not to secure major changes in the electorate, but to lay the groundwork for contesting individual state results if he loses, both in the courts and by trying to persuade elected officials to take action.
+"Lawsuits over non-citizens on voter registration rolls are meritless. But they're part of a weaponized public relations campaign to erode confidence in elections," said Dax Goldstein, senior counsel for the nonpartisan States United Democracy Center, which promotes election security and fairness.
+While national opinion polls, including the Reuters/Ipsos poll, show Harris with a slight lead over Trump, the race is close in the seven most competitive states: Arizona, Georgia, Michigan, Nevada, North Carolina, Pennsylvania and Wisconsin.
+If a Harris win were to hang on just one or two states, a successful Trump challenge to a defeat in those states could be enough to reverse the election's outcome.
+"Our elections are coming down to just dozens or hundreds of votes," said Republican Representative Anthony D'Esposito, who is seeking re-election this year in a toss-up New York district. "If one person that is not an American citizen has the ability to vote in our election, there is a serious problem.""The lawsuits, filed by the Trump campaign, the Republican National Committee, the allied America First Legal Foundation and Republican state attorneys general, primarily target state and county election processes, alleging that officials are failing to do enough to prevent non-citizens from registering or remaining on voter lists.
+Rick Hasen, a law professor at the University of California, Los Angeles, and an expert on election law, said that the lawyers bringing these cases have reason to use more careful language than Trump and his allies do in discussing them.
+"The public messaging is aimed at trying to convince the Republican base that Democrats are trying to steal elections and there's a lot of fraud," Hasen said. "Once you get to court, you are subject to the rules of court, and I think you see lawyers being a lot more circumspect."
+Trump tried unsuccessfully to overturn his 2020 loss to Democratic President Joe Biden in a campaign that included more than 60 lawsuits and inspired his supporters' Jan. 6, 2021, attack on the U.S. Capitol.
+Nearly all of the 2020 lawsuits filed by Trump and his allies were dismissed for lack of evidence and other issues.
+Four of this year's lawsuits, filed in Michigan, Pennsylvania, Kansas and Texas, claim that a 2021 Biden administration initiative involving federal agencies in efforts to promote voter registration is a partisan effort to register voters likely to support Democrats.
+Ken Blackwell, a former Ohio secretary of state who chairs the America First Policy Institute's Center for Election Integrity, said on the social platform X last month that the Biden administration was staging an "attempt to weaponize federal agencies into a leftwing election operation that opens the doors to non-citizen voting."
+A 41-page complaint filed in Kansas federal court by Republican attorneys general from nine states makes only one reference to voting by undocumented immigrants, alleging that the Biden administration failed to examine the risks that "illegal aliens" may try to register to vote.
+The RNC and North Carolina state Republican Party have twice sued that battleground state's election board, making allegations on non-citizen voting. The lawsuits allege the state registered nearly 225,000 voters, about 3% of its total, with insufficient documentation and had not removed from the rolls people who self-identified as non-citizens when reporting for jury duty.
+The state is narrowly divided politically with two Republican senators, a Republican-controlled legislature, but a Democratic governor, Roy Cooper, and an evenly split delegation to the U.S. House of Representatives.
+A state elections board spokesperson, Patrick Gannon, said it had complied with the jury duty requirement and identified nine registered voters who had claimed not to be citizens.
+Those nine will be asked to cancel their registrations if their citizenship status cannot be confirmed, Gannon said, adding that the state cannot force them off the rolls this close to Election Day.
+Gannon said the second lawsuit, over an allegedly flawed registration form, "vastly overstates any alleged problems."
+In Arizona, a lawsuit filed by Trump-aligned advocacy group America First Legal is seeking to force counties to further investigate about 44,000 voters -- about 1% of the statewide total -- who were allowed to register without providing proof of citizenship.
+That dispute revolves around the state's two-tiered voter-registration system, which requires proof of U.S. citizenship to vote in state elections, but does not mandate it in federal elections.
+But even some longtime Arizona political operatives say non-citizen voting poses no danger to local elections.
+"It's not happening," said Chuck Coughlin, a Phoenix-based political strategist who ended his lifelong Republican registration in 2017 and is now an independent. "It's a MAGA narrative intended to gaslight Republicans about election integrity."'''
  
     # send_data_b = "12345612345671234567123456712345671234567123456712345678"
     send_data_a = "Hello"
@@ -554,6 +590,20 @@ The Trump campaign referred a request for comment to a spokesperson for the Repu
             choice = input()
             if choice == 's1':
                 Transmit(bus, id=0x012, TX_DL=8, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
+            elif choice == 's2':  
+                Transmit(bus, id=0x012, TX_DL=12, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
+            elif choice == 's3':  
+                Transmit(bus, id=0x012, TX_DL=16, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)    
+            elif choice == 's4':  
+                Transmit(bus, id=0x012, TX_DL=20, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
+            elif choice == 's5':  
+                Transmit(bus, id=0x012, TX_DL=24, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
+            elif choice == 's6':  
+                Transmit(bus, id=0x012, TX_DL=32, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
+            elif choice == 's7':  
+                Transmit(bus, id=0x012, TX_DL=48, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)          
+            elif choice == 's8':  
+                Transmit(bus, id=0x012, TX_DL=64, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)          
             elif choice == 's2':
                 Transmit(bus, id=0x012, TX_DL=8, data_buf=string_to_ascii_list(send_data_a), length=len(send_data_a), is_fd= True)
             else:

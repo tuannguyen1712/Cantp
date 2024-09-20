@@ -2,12 +2,14 @@ import time
 import can
 import threading
 
-def prGreen(skk): 
+def prGreen(skk):
     print("\033[92m {}\033[00m" .format(skk))
 def prCyan(skk):
     print("\033[96m {}\033[00m".format(skk))
-def prYellow(skk): 
+def prYellow(skk):
     print("\033[93m {}\033[00m" .format(skk))
+def prBlue(skk):
+    print("\033[94m {}\033[00m".format(skk))
 
 SF = 0          # single frame
 FF = 1          # first frame
@@ -127,6 +129,7 @@ def SingleFrameHandle(msg: can.Message, bus):
 
 def FirstFrameHandle(msg: can.Message, bus):
     global Receive_Info, BS, STmin, Receive_State_Info
+    Rcv_thread = threading.Thread(target=ReceiveHanle, args=(Receive_Timeout.Cr, Receive_State_Info,))
     if (msg.data[0] & 0x0F) << 8 | msg.data[1] != 0:
         Receive_Info.data_length = (msg.data[0] & 0x0F) << 8 | msg.data[1]
         if Receive_Info.data_length != 0:
@@ -220,6 +223,7 @@ def FirstFrameHandle(msg: can.Message, bus):
 def ConsecutiveFrameHandle(msg: can.Message, bus):
     global Receive_Info, BS, Receive_State_Info
     ret = False
+    Rcv_thread = threading.Thread(target=ReceiveHanle, args=(Receive_Timeout.Cr, Receive_State_Info,))
     if msg.dlc == 8 or msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64:
         if msg.dlc == Receive_Info.RX_DL and ((msg.data[0] & 0x0F == Receive_Info.SN_cnt + 1) or (msg.data[0] & 0x0F == 0 and Receive_Info.SN_cnt == 15)):
             
@@ -535,7 +539,7 @@ Transmit_State_Info = Transmit_State()
 Receive_Timeout = RcvTimeout(0.2, 0.2, 0.5)
 Transmit_Timeout = TsmTimeout(0.2, 0.5, 0.5)
 
-Rcv_thread = threading.Thread(target=ReceiveHanle, args=(Receive_Timeout.Cr, Receive_State_Info,))
+
 # mutex_send_buf = threading.Lock()
 # mutex_rcv_buf = threading.Lock()
 
@@ -584,7 +588,6 @@ Trump has expressed skepticism about the amount of aid the U.S. has provided Ukr
         Transmit_State_Info.is_done = 1
         notifier1.stop()
         notifier2.stop()
-        Rcv_thread.join()
         # shutdown bus
         bus1.shutdown()
         bus2.shutdown()
