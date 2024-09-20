@@ -159,6 +159,7 @@ def FirstFrameHandle(msg: can.Message, bus):
                 return    
             else:
                 Receive_State_Info.send_FC = 0
+                print("Send FC")
 
             print("Start Cr")
             if (Receive_State_Info.is_done == 1):
@@ -570,7 +571,7 @@ Trump has expressed skepticism about the amount of aid the U.S. has provided Ukr
         while 1:
             choice = input()
             if choice == 's1':
-                Transmit(bus1, id=0x012, TX_DL=8, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
+                Transmit(bus1, id=0x012, TX_DL=64, data_buf=string_to_ascii_list(send_data_b), length=len(send_data_b), is_fd= True)
             elif choice == 's2':
                 Transmit(bus1, id=0x012, TX_DL=8, data_buf=string_to_ascii_list(send_data_a), length=len(send_data_a), is_fd= True)
             else:
