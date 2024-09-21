@@ -126,14 +126,12 @@ def SingleFrameHandle(msg: can.Message, bus):
         if msg.data[0] & 0x0F == msg.dlc - 1:
             print(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 1)}")
             Receive_Info.data_str_buffer = ascii_list_to_string(list(msg.data), DUM_BYTE, 1)
-            Receive_State_Info.SF = 1
         else:
             print("Bus  Receive Error")
     elif msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64:
         if msg.data[0] & 0x0F == 0 and msg.data[1] == msg.dlc - 2:
             print(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 2)}")
             Receive_Info.data_str_buffer = ascii_list_to_string(list(msg.data), DUM_BYTE, 1)
-            Receive_State_Info.SF = 1
         else:
             print(f"Bus  Receive Error")
     else:
@@ -239,7 +237,7 @@ def ConsecutiveFrameHandle(msg: can.Message, bus: can.ThreadSafeBus):
     global Receive_Info, BS, Receive_State_Info
     Rcv_thread = threading.Thread(target=ReceiveHanle, args=(Receive_Timeout.Cr, Receive_State_Info,))
     ret = False
-    if (msg.dlc == 8 or msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64) and Receive_Info.data_length - len(Receive_Info.data_str_buffer) > Receive_Info.RX_DL: 
+    if (msg.dlc == 8 or msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64) and Receive_Info.data_length - len(Receive_Info.data_str_buffer) >= Receive_Info.RX_DL: 
         if (msg.dlc == Receive_Info.RX_DL and ((msg.data[0] & 0x0F == Receive_Info.SN_cnt + 1) or (msg.data[0] & 0x0F == 0 and Receive_Info.SN_cnt == 15))):
            
             Receive_Info.SN_cnt = msg.data[0] & 0x0F
