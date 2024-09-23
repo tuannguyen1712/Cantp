@@ -24,13 +24,13 @@ OVFLW = 2         # overflow
  
 DUM_BYTE = 0x00
 ID_SEND = 0x089
-ID_RECEIVE1 = ID_TRANSMIT1 = 0x001
-ID_RECEIVE2 = ID_TRANSMIT2 = 0x002
+ID_RECEIVE1 = ID_TRANSMIT1 = 0x111
+ID_RECEIVE2 = ID_TRANSMIT2 = 0x222
 ID_RECEIVE3 = ID_TRANSMIT3 = 0x003
  
 WFT = 3                 # maximum FC(WAIT) in row
 BS = 5
-STmin = 1            #127 ms
+STmin = 10            #127 ms
  
 bus = can.interface.Bus(interface='neovi', channel=1, bitrate=500000, receive_own_messages = False)
 # bus1 = can.interface.Bus('test', interface='virtual')
@@ -103,8 +103,8 @@ class TsmTimeout():
         self.Bs = Bs
         self.Cs = Cs
        
-Receive_Timeout = RcvTimeout(0.5, 0.5, 1)
-Transmit_Timeout = TsmTimeout(0.5, 1, 1)
+Receive_Timeout = RcvTimeout(0.2, 0.2, 0.4)
+Transmit_Timeout = TsmTimeout(0.2, 0.4, 0.4)
  
 # Receive_Timeout = RcvTimeout(4, 4, 8)
 # Transmit_Timeout = TsmTimeout(4, 8, 8)
@@ -152,7 +152,6 @@ class Frame():
                 replace_elements(self.framefomart, data, 6)
         elif frametype == CF:                    # need frametype, data, len, SN
             self.framefomart[0] = (CF << 4) | SN
-            # prGreen(f"{self.framefomart[0]} {CF} {SN}")
             self.framefomart[1:len(data) + 1] = data
         elif frametype == FC:                    # need frametype, data, len, BS, STmin
             self.framefomart[0] = (FC << 4) | FS
@@ -204,7 +203,6 @@ def FirstFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
         else:
             print(f"Bus  Bus  Receive FF 1fail")
     else:
-        # edit later
         Receive_Info.data_length = (msg.data[2] << 24) | (msg.data[3] << 16) | (msg.data[4] << 8) | msg.data[5]
         if Receive_Info.data_length != 0:
             Receive_Info.BS_cnt = BS
@@ -248,7 +246,7 @@ def ConsecutiveFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
         Receive_Info.data_hex_buf.clear()
         Receive_Info.data_hex_buf.extend(msg.data[1:])
         Receive_Info.data_str_buffer += ascii_list_to_string(Receive_Info.data_hex_buf, DUM_BYTE)
-        prCyan(f"Receive data: {Receive_Info.data_str_buffer}")
+        prCyan(f"Receive data {len(Receive_Info.data_str_buffer)}: {Receive_Info.data_str_buffer} ")
         prGreen(f"Complete receive msg {msg.arbitration_id}")
         Receive_Info.receive_CF = 1
         Receive_Info.is_done = 1
@@ -262,7 +260,6 @@ def FlowControlHandle(msg: can.Message, Transmit_Info: Transmit_Info, bus):
             prBlue(f"receive_FC {msg.arbitration_id} {time.time()} ")
             Transmit_Info.BS_cnt = msg.data[1]
             Transmit_Info.STmin = msg.data[2]
-            # prBlue(f"Bus  Receive CTS ")
         elif msg.data[0] &0x0F == WAIT:
             prBlue(f"Bus  {msg.arbitration_id} Receive WAIT")
             # reload Bs
@@ -283,10 +280,10 @@ def replace_elements(list1, list2, n):
     list1[n:n + num_elements_to_replace] = list2[:num_elements_to_replace]
     return list1
  
-def CalculateSTmin(Stmin: int = 0):
+def CalculateSTmin(STmin: int):
     if STmin <= 127:
         return STmin / 1000
-    elif Stmin >= 0xF1 and Stmin <= 0xF9:
+    elif STmin >= 0xF1 and STmin <= 0xF9:
         return (STmin & 0x0F) / 10000
  
 class ListenerHandlebus(can.Listener):
@@ -370,7 +367,6 @@ def TransmitTask(bus, id: int, Transmit_Info: Transmit_Info, Transmit_Timeout: T
         while index < length and Transmit_Info.is_done == 0:
             Transmit_Info.is_done = 0
             time.sleep(CalculateSTmin(Transmit_Info.STmin))
-            # Transmit_State_Info.receive_FC = 0
             if index + TX_DL - 1 < length:              # check
                 last_index = index
                 index = index + TX_DL - 1
@@ -422,6 +418,7 @@ def TransmitTask(bus, id: int, Transmit_Info: Transmit_Info, Transmit_Timeout: T
                     Transmit_Info.is_done = 1
                     return
             else:
+                # N_Cs timeout, handle later
                 # Transmit_State_Info.time_Cs = time.time()
                 # Transmit_State_Info.check_Cs()
                 # time.sleep(CalculateSTmin(Transmit_Info.STmin))
@@ -472,7 +469,7 @@ def FC_TransmitTask(bus, id: int, Receive_Info: Receive_Info, Timeout_Info: RcvT
                     Receive_Info.BS_cnt = BS
                     FC_frame = Frame(frametype=FC, length=8, FS = CTS, BS = BS, STmin = STmin)          
                     msg_send_fc = can.Message(arbitration_id=id, data=FC_frame.framefomart, is_extended_id=False)
-                    print(f"start N_Ar {id}")
+                    print(f"start N_Ar {id} {msg_send_fc}")
                     # dont set this flag if want to get N_Ar timeout
                     Receive_Info.send_FC = 1                        # ART
                     ret = SendMsg(bus=bus, msg=msg_send_fc, timeout=Receive_Timeout.Ar, flag = Receive_Info.send_FC)
