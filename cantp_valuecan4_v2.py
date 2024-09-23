@@ -30,7 +30,7 @@ ID_RECEIVE3 = ID_TRANSMIT3 = 0x003
  
 WFT = 3                 # maximum FC(WAIT) in row
 BS = 5
-STmin = 10            #127 ms
+STmin = 100            #127 ms
  
 bus = can.interface.Bus(interface='neovi', channel=1, bitrate=500000, receive_own_messages = False)
 # bus1 = can.interface.Bus('test', interface='virtual')
@@ -518,6 +518,13 @@ def find_min_greater(x):
             return value
     return None
  
+def dynamic_config(new_WFT: int, new_BS: int, new_STmin: int):
+    global WFT, BS, STmin
+    WFT = new_WFT
+    BS = new_BS
+    STmin = new_STmin
+ 
+ 
 if __name__ == "__main__":
  
     notifier = can.Notifier(bus, [ListenerHandlebus()])
@@ -554,7 +561,7 @@ In Arizona, a lawsuit filed by Trump-aligned advocacy group America First Legal 
 That dispute revolves around the state's two-tiered voter-registration system, which requires proof of U.S. citizenship to vote in state elections, but does not mandate it in federal elections.
 But even some longtime Arizona political operatives say non-citizen voting poses no danger to local elections.
 "It's not happening," said Chuck Coughlin, a Phoenix-based political strategist who ended his lifelong Republican registration in 2017 and is now an independent. "It's a MAGA narrative intended to gaslight Republicans about election integrity."'''
-
+ 
     # send_data_b = "12345612345671234567123456712345678"
     send_data_a = "qwertyuioplkjhgfdsazxcvbnmqwertyuioplkjhgfdsazxcvbnm"
     send_data_c = "Hello World"
@@ -565,6 +572,11 @@ But even some longtime Arizona political operatives say non-citizen voting poses
                 CanTp_Transmit(bus=bus, id= ID_TRANSMIT1, buffer=send_data_b, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
                 # CanTp_Transmit(bus=bus, id= ID_TRANSMIT2, buffer=send_data_a, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
                 # CanTp_Transmit(bus=bus, id= ID_TRANSMIT3, buffer=send_data_c, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
+            elif choice == "dc":
+                new_BS = int(input("Enter new BS: "))
+                new_STmin = int(input("Enter new STmin: "))
+                new_WFT = int(input("Enter new WFT limit: "))
+                dynamic_config(new_WFT= new_WFT, new_BS=new_BS, new_STmin=new_STmin)
             else:
                 print("quit")
                 break
