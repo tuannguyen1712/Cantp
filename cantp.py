@@ -24,9 +24,9 @@ OVFLW = 2         # overflow
  
 DUM_BYTE = 0x00
 ID_SEND = 0x089
-ID_RECEIVE1 = ID_TRANSMIT1 = 0x001
-ID_RECEIVE2 = ID_TRANSMIT2 = 0x002
-ID_RECEIVE3 = ID_TRANSMIT3 = 0x003
+ID_RECEIVE1 = ID_TRANSMIT1 = 0x111
+ID_RECEIVE2 = ID_TRANSMIT2 = 0x222
+ID_RECEIVE3 = ID_TRANSMIT3 = 0x333
  
 WFT = 3                 # maximum FC(WAIT) in row
 BS = 5
@@ -586,6 +586,13 @@ But even some longtime Arizona political operatives say non-citizen voting poses
                 # CanTp_Transmit(bus=bus1, id= ID_TRANSMIT2, buffer=send_data_a, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
                 # # time.sleep(0.005)
                 # CanTp_Transmit(bus=bus1, id= ID_TRANSMIT3, buffer=send_data_c, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
+            elif choice.startswith('p') and choice[1:].isdigit():
+                # number = choice[1:]
+                try:
+                    decimal_number = int(choice[1:], 16)
+                    print(f"ID: 0x{choice[1:]} \t data: {Receive_Info_Dict[decimal_number].data_str_buffer}")
+                except KeyError:
+                    print("Invalid ID, use syntax p<ID>")
             else:
                 print("quit")
                 break

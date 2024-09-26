@@ -22,15 +22,17 @@ CTS = 0         # Clear to send
 WAIT = 1        # wait
 OVFLW = 2         # overflow
  
-DUM_BYTE = 0x00
+DUM_BYTE = 0xCC
 ID_SEND = 0x089
 ID_RECEIVE1 = ID_TRANSMIT1 = 0x111
 ID_RECEIVE2 = ID_TRANSMIT2 = 0x222
-ID_RECEIVE3 = ID_TRANSMIT3 = 0x003
- 
+ID_RECEIVE3 = ID_TRANSMIT3 = 0x333
+ID_RECEIVE4 = ID_TRANSMIT4 = 0x444
+ID_RECEIVE5 = ID_TRANSMIT5 = 0x555
+ID_RECEIVE6 = ID_TRANSMIT6 = 0x666
 WFT = 3                 # maximum FC(WAIT) in row
 BS = 5
-STmin = 100            #127 ms
+STmin = 10            #127 ms
  
 bus = can.interface.Bus(interface='neovi', channel=1, bitrate=500000, receive_own_messages = False)
 # bus1 = can.interface.Bus('test', interface='virtual')
@@ -103,8 +105,8 @@ class TsmTimeout():
         self.Bs = Bs
         self.Cs = Cs
        
-Receive_Timeout = RcvTimeout(0.2, 0.2, 0.4)
-Transmit_Timeout = TsmTimeout(0.2, 0.4, 0.4)
+Receive_Timeout = RcvTimeout(0.4, 0.4, 0.8)
+Transmit_Timeout = TsmTimeout(0.4, 0.8, 0.8)
  
 # Receive_Timeout = RcvTimeout(4, 4, 8)
 # Transmit_Timeout = TsmTimeout(4, 8, 8)
@@ -113,12 +115,17 @@ Transmit_Info_Dict = {
     ID_TRANSMIT1: Transmit_Info(),
     ID_TRANSMIT2: Transmit_Info(),
     ID_TRANSMIT3: Transmit_Info(),
+    ID_TRANSMIT4: Transmit_Info(),
+    ID_TRANSMIT4: Transmit_Info(),
+    ID_TRANSMIT5: Transmit_Info(),
+    ID_TRANSMIT6: Transmit_Info(),
 }
  
 Receive_Info_Dict = {
     ID_RECEIVE1: Receive_Info(),
     ID_RECEIVE2: Receive_Info(),
     ID_RECEIVE3: Receive_Info(),
+    ID_RECEIVE4: Receive_Info(),
 }
  
 class Frame():
@@ -163,20 +170,22 @@ class Frame():
 def SingleFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
     Receive_Info.reset_param()
     if msg.dlc <= 8:
-        if msg.data[0] & 0x0F == msg.dlc - 1:
-            print(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 1)}")
+        if msg.data[0] & 0x0F <= msg.dlc - 1:
+            prCyan(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 1)}")
             Receive_Info.data_str_buffer = ascii_list_to_string(list(msg.data), DUM_BYTE, 1)
             Receive_Info.SF = 1
         else:
+            Receive_Info.is_done = 1
             print("Bus  Receive Error")
     elif msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64:
-        if msg.data[0] & 0x0F == 0 and msg.data[1] == msg.dlc - 2:
-            print(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 2)}")
+        if msg.data[0] & 0x0F == 0 and msg.data[1] < msg.dlc - 1:
+            prCyan(f"Bus  Receive SF {ascii_list_to_string(list(msg.data), DUM_BYTE, 2)}")
             Receive_Info.data_str_buffer = ascii_list_to_string(list(msg.data), DUM_BYTE, 1)
             Receive_Info.SF = 1
         else:
             print(f"Bus  Receive Error")
     else:
+        Receive_Info.is_done = 1
         print(f"Bus  Receive SF Fail")
  
 def FirstFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
@@ -201,6 +210,7 @@ def FirstFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
             Receive_Info.available_receive = 1
             TxTask.start()
         else:
+            Receive_Info.is_done = 1
             print(f"Bus  Bus  Receive FF 1fail")
     else:
         Receive_Info.data_length = (msg.data[2] << 24) | (msg.data[3] << 16) | (msg.data[4] << 8) | msg.data[5]
@@ -220,12 +230,13 @@ def FirstFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
             # Receive_Info.available_receive = 0             # BRT
             TxTask.start()
         else:
+            Receive_Info.is_done = 1
             print(f"Bus  Receive FF 2fail")
  
 def ConsecutiveFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
     global BS
     if (msg.dlc == 8 or msg.dlc == 12 or msg.dlc == 16 or msg.dlc == 20 or msg.dlc == 24 or msg.dlc == 32 or msg.dlc == 48 or msg.dlc == 64) \
-        and Receive_Info.data_length - len(Receive_Info.data_str_buffer) >= Receive_Info.RX_DL and Receive_Info.is_done == 0:
+        and (Receive_Info.data_length - len(Receive_Info.data_str_buffer) >= Receive_Info.RX_DL) and Receive_Info.is_done == 0:
         if (msg.dlc == Receive_Info.RX_DL and ((msg.data[0] & 0x0F == Receive_Info.SN_cnt + 1) or (msg.data[0] & 0x0F == 0 and Receive_Info.SN_cnt == 15))):
            
             Receive_Info.SN_cnt = msg.data[0] & 0x0F
@@ -241,6 +252,7 @@ def ConsecutiveFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
                 # Receive_Info.available_receive = 0             # BRT2
                 Receive_Info.receive_CF = 1
         else:
+            Receive_Info.is_done = 1
             print(f"Bus  Receive CS fail1 {msg.data[0]}, {Receive_Info.SN_cnt + 1} {(msg.data[0] & 0x0F == Receive_Info.SN_cnt + 1)} {msg.data[0] == 0 and Receive_Info.SN_cnt == 15}")
     elif Receive_Info.data_length - len(Receive_Info.data_str_buffer) < Receive_Info.RX_DL and Receive_Info.is_done == 0:
         Receive_Info.data_hex_buf.clear()
@@ -251,7 +263,8 @@ def ConsecutiveFrameHandle(msg: can.Message, Receive_Info: Receive_Info, bus):
         Receive_Info.receive_CF = 1
         Receive_Info.is_done = 1
     else:
-        print(f"Bus  Receive CS fail3 {Receive_Info.data_str_buffer} {Receive_Info.data_length} {len(Receive_Info.data_str_buffer)}")
+        Receive_Info.is_done = 1
+        print(f"Bus  Receive CS fail3")
  
 def FlowControlHandle(msg: can.Message, Transmit_Info: Transmit_Info, bus):
     if msg.dlc == 8:
@@ -265,6 +278,7 @@ def FlowControlHandle(msg: can.Message, Transmit_Info: Transmit_Info, bus):
             # reload Bs
             Transmit_Info.time_Bs = time.time()
         elif msg.data[0] &0x0F == OVFLW:  
+            Transmit_Info.is_done = 1
             prBlue(f"Bus  Overflow, abort connection  {msg.arbitration_id}")
     else:
         prBlue(f"Bus  Receive FC fail, abort connection  {msg.arbitration_id}")
@@ -289,19 +303,20 @@ def CalculateSTmin(STmin: int):
 class ListenerHandlebus(can.Listener):
     global bus, Receive_Info_Dict
     def on_message_received(self, msg: can.Message):
-        print(f"Receive message bus 2: {msg}")
-        if msg.data[0] >> 4 == 0:
-            # print("Single frame")
-            SingleFrameHandle(msg, Receive_Info_Dict[msg.arbitration_id], bus)
-        elif msg.data[0] >> 4 == 1:
-            # print("First frame")
-            FirstFrameHandle(msg=msg, Receive_Info = Receive_Info_Dict[msg.arbitration_id], bus=bus)
-        elif msg.data[0] >> 4 == 2:
-            # print("Consecutive frame")
-            ConsecutiveFrameHandle(msg=msg, Receive_Info = Receive_Info_Dict[msg.arbitration_id], bus=bus)
-        elif msg.data[0] >> 4 == 3:
-            # print("Flow control")
-            FlowControlHandle(msg,Transmit_Info_Dict[msg.arbitration_id], bus)
+        if msg.arbitration_id != 0: 
+            print(f"Receive message bus 2: {msg}")
+            if msg.data[0] >> 4 == 0:
+                # print("Single frame")
+                SingleFrameHandle(msg, Receive_Info_Dict[msg.arbitration_id], bus)
+            elif msg.data[0] >> 4 == 1:
+                # print("First frame")
+                FirstFrameHandle(msg=msg, Receive_Info = Receive_Info_Dict[msg.arbitration_id], bus=bus)
+            elif msg.data[0] >> 4 == 2:
+                # print("Consecutive frame")
+                ConsecutiveFrameHandle(msg=msg, Receive_Info = Receive_Info_Dict[msg.arbitration_id], bus=bus)
+            elif msg.data[0] >> 4 == 3:
+                # print("Flow control")
+                FlowControlHandle(msg,Transmit_Info_Dict[msg.arbitration_id], bus)
  
 def TransmitTask(bus, id: int, Transmit_Info: Transmit_Info, Transmit_Timeout: TsmTimeout, \
              TX_DL: int , data_buf: list, length: int, is_fd: bool = False):
@@ -381,7 +396,7 @@ def TransmitTask(bus, id: int, Transmit_Info: Transmit_Info, Transmit_Timeout: T
                 # dont set this flag if want to get N_As timeout
                 Transmit_Info.send_frame = 1                   # get TxComfirmation           AST1
                 ret = SendMsg(bus=bus, msg=msg_send, timeout=Transmit_Timeout.As, flag = Transmit_Info.send_frame)
-                prBlue(f"send CF {id} {time.time()} ")
+                prBlue(f"send CF {id} {time.time()} {msg_send} ")
  
                 if ret == False:        #N_As occurrence
                     prYellow(f"N_As timeout {id}")
@@ -402,6 +417,7 @@ def TransmitTask(bus, id: int, Transmit_Info: Transmit_Info, Transmit_Timeout: T
                 # dont set this flag if want to get N_As timeout
                 Transmit_Info.send_frame = 1                    # AST2
                 ret = SendMsg(bus=bus, msg=msg_send, timeout=Transmit_Timeout.As, flag = Transmit_Info.send_frame)
+                prBlue(f"send CF {id} {time.time()} {msg_send} ")
                 if ret == False:        #N_As occurrence
                     prYellow(f"N_As timeout {id}")
                     Transmit_Info.is_done = 1
@@ -569,14 +585,21 @@ But even some longtime Arizona political operatives say non-citizen voting poses
         while 1:
             choice = input()
             if choice == 's1':
-                CanTp_Transmit(bus=bus, id= ID_TRANSMIT1, buffer=send_data_b, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
-                # CanTp_Transmit(bus=bus, id= ID_TRANSMIT2, buffer=send_data_a, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
+                CanTp_Transmit(bus=bus, id= ID_TRANSMIT4, buffer=send_data_b, Transmit_Timeout= Transmit_Timeout, TX_DL = 32, is_fd= True)       # len: 7000
+                CanTp_Transmit(bus=bus, id= ID_TRANSMIT5, buffer=send_data_a, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
                 # CanTp_Transmit(bus=bus, id= ID_TRANSMIT3, buffer=send_data_c, Transmit_Timeout= Transmit_Timeout, TX_DL = 8, is_fd= True)
             elif choice == "dc":
                 new_BS = int(input("Enter new BS: "))
                 new_STmin = int(input("Enter new STmin: "))
                 new_WFT = int(input("Enter new WFT limit: "))
                 dynamic_config(new_WFT= new_WFT, new_BS=new_BS, new_STmin=new_STmin)
+            elif choice.startswith('p') and choice[1:].isdigit():
+                # number = choice[1:]
+                try:
+                    decimal_number = int(choice[1:], 16)
+                    prCyan(f"ID: 0x{choice[1:]} \t data: {Receive_Info_Dict[decimal_number].data_str_buffer}")
+                except KeyError:
+                    prRed("Invalid ID, use syntax p<ID>")
             else:
                 print("quit")
                 break
@@ -584,3 +607,5 @@ But even some longtime Arizona political operatives say non-citizen voting poses
     except KeyboardInterrupt:
         notifier.stop()
         bus.shutdown()
+    notifier.stop()
+    bus.shutdown()
